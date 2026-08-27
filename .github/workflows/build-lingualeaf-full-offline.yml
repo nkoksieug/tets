@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode lingualeaf-build/source.tar.gz.b64 > source.tar.gz
+          cp lingualeaf-build/source.tar.gz.b64 source.tar.gz
           echo "d966ebca1defe46b25866ff5a303dfdcc806a6623f780ca57d7d55ba130f2651  source.tar.gz" | sha256sum --check --strict
           mkdir app
           tar -xzf source.tar.gz -C app
