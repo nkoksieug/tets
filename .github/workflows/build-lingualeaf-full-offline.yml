@@ -1,0 +1,104 @@
+name: Build LinguaLeaf V10.6.0 Full Offline
+
+on:
+  push:
+    branches:
+      - lingualeaf-build
+    paths:
+      - lingualeaf-build/**
+      - .github/workflows/build-lingualeaf-full-offline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lingualeaf-v10.6.0-full-offline
+  cancel-in-progress: false
+
+jobs:
+  build-windows-x64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SITES_INSTALL_TIMEOUT: 20m
+      SITES_BUILD_TIMEOUT: 10m
+
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode lingualeaf-build/source.tar.gz.b64 > source.tar.gz
+          echo "c103ca66a772327ef53a7c94375a2f07ef7b47c02f866f96aa2f3c4ed5e6456d  source.tar.gz" | sha256sum --check --strict
+          mkdir app
+          tar -xzf source.tar.gz -C app
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: app
+        shell: bash
+        run: npm ci
+
+      - name: Prepare OCR and PDF assets
+        working-directory: app
+        shell: bash
+        run: npm run prepare:offline-assets
+
+      - name: Build and test web application
+        working-directory: app
+        shell: bash
+        run: |
+          npm run build
+          node --experimental-strip-types --test tests/layout-order.test.ts tests/translation-progress.test.ts tests/translation-chunks.test.ts tests/language-validation.test.ts
+          node --test tests/rendered-html.test.mjs tests/desktop-main.test.mjs tests/reader-features.test.mjs
+
+      - name: Download and verify all four offline models
+        working-directory: app
+        shell: bash
+        run: npm run desktop:models
+
+      - name: Package Windows x64 application
+        working-directory: app
+        shell: bash
+        run: npm run desktop:package
+
+      - name: Verify packaged desktop server
+        working-directory: app
+        shell: bash
+        run: npm run desktop:smoke
+
+      - name: Build full offline installer
+        working-directory: app
+        shell: bash
+        run: npm run desktop:installer
+
+      - name: Record checksums and sizes
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe > artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe.sha256
+          stat --printf='%n %s bytes\n' artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe artifacts/LinguaLeaf-V10.6.0-Desktop-Source.zip | tee artifacts/SIZES.txt
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinguaLeaf-V10.6.0-Full-Offline-Windows-x64
+          path: |
+            app/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe
+            app/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe.sha256
+            app/artifacts/LinguaLeaf-V10.6.0-Desktop-Source.zip
+            app/artifacts/SIZES.txt
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
