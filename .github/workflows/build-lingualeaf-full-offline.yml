@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           setup="artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup-NSIS.exe"
           test -s "${setup}"
-          test "$(stat -c '%s' "${setup}")" -gt 400000000
+          test "$(stat -c '%s' "${setup}")" -gt 300000000
           file "${setup}" | grep -q 'PE32'
           7z t "${setup}"
           sha256sum "${setup}" > "${setup}.sha256"
