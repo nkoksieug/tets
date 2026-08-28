@@ -1,4 +1,4 @@
-name: Build LinguaLeaf V10.6.0 Full Offline
+name: Build LinguaLeaf V10.6.0 Full Offline NSIS Fix
 
 on:
   push:
@@ -13,13 +13,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: lingualeaf-v10.6.0-full-offline
+  group: lingualeaf-v10.6.0-full-offline-nsis-fix
   cancel-in-progress: false
 
 jobs:
   build-windows-x64:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       SITES_INSTALL_TIMEOUT: 20m
       SITES_BUILD_TIMEOUT: 10m
@@ -28,7 +28,7 @@ jobs:
       - name: Checkout build branch
         uses: actions/checkout@v4
 
-      - name: Reconstruct verified source
+      - name: Reconstruct verified existing source
         shell: bash
         run: |
           set -euo pipefail
@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: npm run prepare:offline-assets
 
-      - name: Build and test web application
+      - name: Build and test application
         working-directory: app
         shell: bash
         run: |
@@ -72,31 +72,56 @@ jobs:
         shell: bash
         run: npm run desktop:package
 
-      - name: Verify packaged desktop server
-        working-directory: app
-        shell: bash
-        run: npm run desktop:smoke
-
-      - name: Build full offline installer
-        working-directory: app
-        shell: bash
-        run: npm run desktop:installer
-
-      - name: Record checksums and sizes
+      - name: Verify packaged desktop server and models
         working-directory: app
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe > artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe.sha256
-          stat --printf='%n %s bytes\n' artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe artifacts/LinguaLeaf-V10.6.0-Desktop-Source.zip | tee artifacts/SIZES.txt
+          npm run desktop:smoke
+          model_root="artifacts/electron/LinguaLeaf-win32-x64/resources/app/dist/client/models/Xenova"
+          for model in opus-mt-en-vi opus-mt-vi-en opus-mt-en-zh opus-mt-zh-en; do
+            test -s "${model_root}/${model}/onnx/encoder_model_quantized.onnx"
+            test -s "${model_root}/${model}/onnx/decoder_model_merged_quantized.onnx"
+          done
+          test -s "artifacts/electron/LinguaLeaf-win32-x64/resources/app/dist/client/models/lingualeaf-model-pack.json"
 
-      - name: Upload installer
+      - name: Install NSIS
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis p7zip-full
+
+      - name: Build standard NSIS installer
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          makensis -V3 \
+            -DAPP_DIR="$PWD/artifacts/electron/LinguaLeaf-win32-x64" \
+            -DSETUP_PATH="$PWD/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup-NSIS.exe" \
+            -DICON_PATH="$PWD/packaging/LinguaLeaf.ico" \
+            "$GITHUB_WORKSPACE/lingualeaf-build/LinguaLeaf-Installer.nsi"
+
+      - name: Test NSIS archive and record checksum
+        working-directory: app
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup="artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup-NSIS.exe"
+          test -s "${setup}"
+          test "$(stat -c '%s' "${setup}")" -gt 400000000
+          file "${setup}" | grep -q 'PE32'
+          7z t "${setup}"
+          sha256sum "${setup}" > "${setup}.sha256"
+          stat --printf='%n %s bytes\n' "${setup}" artifacts/LinguaLeaf-V10.6.0-Desktop-Source.zip | tee artifacts/SIZES.txt
+
+      - name: Upload fixed full offline installer
         uses: actions/upload-artifact@v4
         with:
-          name: LinguaLeaf-V10.6.0-Full-Offline-Windows-x64
+          name: LinguaLeaf-V10.6.0-Full-Offline-NSIS-Fix-Windows-x64
           path: |
-            app/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe
-            app/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup.exe.sha256
+            app/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup-NSIS.exe
+            app/artifacts/LinguaLeaf-V10.6.0-Full-Offline-Setup-NSIS.exe.sha256
             app/artifacts/LinguaLeaf-V10.6.0-Desktop-Source.zip
             app/artifacts/SIZES.txt
           compression-level: 0
